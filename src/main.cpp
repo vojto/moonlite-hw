@@ -12,8 +12,13 @@
 #define WAV_HEADER_SIZE 44
 #define CHUNK_FRAMES 512
 
+// Tapping the screen plays the wind for a nap of this length
+#define NAP_MS (15 * 60 * 1000UL)
+
 M5EchoBase echobase(I2S_NUM_0);
 volatile bool isWindOn = false;
+bool isNapping = false;
+uint32_t napStartMs = 0;
 
 // Loops the wind file forever; plays silence while the wind is off
 void windTask(void *) {
@@ -78,7 +83,12 @@ void drawWindStatus() {
   M5.Display.setTextSize(1);
   M5.Display.setCursor(4, 116);
   M5.Display.setTextColor(TFT_SKYBLUE, TFT_BLACK);
-  M5.Display.printf("%-21s", isWindOn ? "Wind: on" : "Wind: off");
+  if (isNapping) {
+    uint32_t secondsLeft = (NAP_MS - (millis() - napStartMs)) / 1000;
+    M5.Display.printf("Nap: %lu:%02lu left       ", secondsLeft / 60, secondsLeft % 60);
+  } else {
+    M5.Display.printf("%-21s", isWindOn ? "Wind: on" : "Wind: off");
+  }
 }
 
 void showError(const char *text) {
@@ -109,11 +119,17 @@ void setup() {
 void loop() {
   M5.update();
 
+  if (M5.BtnA.wasPressed()) {
+    isNapping = true;
+    napStartMs = millis();
+  }
+  if (isNapping && millis() - napStartMs >= NAP_MS) isNapping = false;
+
   static bool wasTimeSynced = false;
   struct tm now;
   bool isTimeSynced = getLocalTime(&now, 0);
-  // Plays at night, from 23:00 until 6:00
-  isWindOn = isTimeSynced && (now.tm_hour >= 23 || now.tm_hour < 6);
+  // Plays at night, from 23:00 until 6:00, or during a nap
+  isWindOn = isNapping || (isTimeSynced && (now.tm_hour >= 23 || now.tm_hour < 6));
   if (isTimeSynced != wasTimeSynced) {
     M5.Display.fillScreen(TFT_BLACK);
     wasTimeSynced = isTimeSynced;
